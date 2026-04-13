@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+dist/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+.ruff_cache/
+.env
+.env.*
