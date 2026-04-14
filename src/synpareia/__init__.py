@@ -10,10 +10,12 @@ from synpareia.chain.storage import ChainStore, MemoryStore
 from synpareia.commitment import create_commitment, create_commitment_block, verify_commitment
 from synpareia.hash import canonical_hash, content_hash, jcs_canonicalize
 from synpareia.identity import Profile, from_private_key, from_public_key, generate
+from synpareia.seal import SealPayload, create_seal, create_seal_block
+from synpareia.seal.verify import verify_seal
 from synpareia.signing import sign, verify
-from synpareia.types import AnchorType, BlockType, ChainType, ContentMode
+from synpareia.types import AnchorType, BlockType, ChainType, ContentMode, SealType
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "AnchorPayload",
@@ -27,6 +29,8 @@ __all__ = [
     "ContentMode",
     "MemoryStore",
     "Profile",
+    "SealPayload",
+    "SealType",
     "__version__",
     "append_block",
     "canonical_hash",
@@ -36,6 +40,8 @@ __all__ = [
     "create_chain",
     "create_commitment",
     "create_commitment_block",
+    "create_seal",
+    "create_seal_block",
     "export_chain",
     "from_private_key",
     "from_public_key",
@@ -49,4 +55,5 @@ __all__ = [
     "verify_chain",
     "verify_commitment",
     "verify_export",
+    "verify_seal",
 ]
