@@ -12,6 +12,16 @@ pip install synpareia
 
 Requires Python 3.11+. Only dependency: `cryptography`.
 
+### Verify you have the SDK
+
+```python
+import synpareia
+assert synpareia.__version__ >= "0.2.0"
+assert hasattr(synpareia, "generate"), "you have a different 'synpareia' in your venv"
+```
+
+If `hasattr(synpareia, "generate")` is False, something else in your environment is shadowing the SDK. Use a fresh virtualenv (`python -m venv .venv && source .venv/bin/activate && pip install synpareia`) and try again.
+
 ## Quick Start
 
 ### Create an identity
