@@ -62,7 +62,19 @@ def from_private_key(private_key: bytes) -> Profile:
 
 
 def from_public_key(public_key: bytes) -> Profile:
-    """Create a public-only Profile (can verify but not sign)."""
+    """Create a public-only Profile (can verify but not sign).
+
+    Ed25519 public keys are exactly 32 bytes; reject anything else early so
+    callers don't get a deferred verification failure later. The cryptography
+    backend would also reject this on first signature-verify, but failing
+    here keeps the error close to the source.
+    """
+    if not isinstance(public_key, bytes) or len(public_key) != 32:
+        if isinstance(public_key, (bytes, bytearray)):
+            got = f"{len(public_key)} bytes"
+        else:
+            got = type(public_key).__name__
+        raise ValueError(f"Ed25519 public key must be 32 bytes (got {got})")
     return Profile(
         id=_derive_did(public_key),
         public_key=public_key,

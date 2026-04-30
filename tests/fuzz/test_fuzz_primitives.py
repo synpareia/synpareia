@@ -21,7 +21,10 @@ from hypothesis import strategies as st
 
 import synpareia
 from synpareia import commitment as commit_module
+from synpareia.policy import templates
 from synpareia.types import BlockType
+
+GENESIS = 1  # POLICY block at position 1
 
 FUZZ = settings(
     max_examples=40,
@@ -59,7 +62,7 @@ class TestChainInterleavingFuzz:
     @given(counts=st.lists(st.integers(min_value=0, max_value=5), min_size=1, max_size=10))
     def test_interleaved_append_verify_export_reimport(self, counts: list[int]) -> None:
         profile = synpareia.generate()
-        chain = synpareia.create_chain(profile)
+        chain = synpareia.create_chain(profile, policy=templates.cop(profile))
 
         total = 0
         for batch in counts:
@@ -72,11 +75,11 @@ class TestChainInterleavingFuzz:
 
             # Export/verify must succeed at any point
             export = synpareia.export_chain(chain)
-            result = synpareia.verify_export(export)
+            result = synpareia.verify_export(export, public_keys={profile.id: profile.public_key})
             # verify_export may return True, (True, []) or {"valid": True, ...}
             assert _is_valid(result)
 
-        assert chain.length == total
+        assert chain.length == GENESIS + total
 
 
 class TestCommitmentAdversarialFuzz:
@@ -146,12 +149,14 @@ class TestExportRoundtripFuzz:
     @given(messages=st.lists(st.binary(min_size=0, max_size=200), min_size=1, max_size=8))
     def test_export_reimport_chain_verifies(self, messages: list[bytes]) -> None:
         profile = synpareia.generate()
-        chain = synpareia.create_chain(profile)
+        chain = synpareia.create_chain(profile, policy=templates.cop(profile))
         for msg in messages:
             chain.append(synpareia.create_block(profile, BlockType.MESSAGE, msg))
 
         export = synpareia.export_chain(chain)
-        assert _is_valid(synpareia.verify_export(export))
+        assert _is_valid(
+            synpareia.verify_export(export, public_keys={profile.id: profile.public_key})
+        )
 
 
 def _is_valid(result: object) -> bool:

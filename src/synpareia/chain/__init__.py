@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -10,7 +10,8 @@ if TYPE_CHECKING:
 
     from synpareia.block import Block
     from synpareia.chain.storage import ChainStore
-    from synpareia.types import ChainType
+    from synpareia.policy.model import Policy
+    from synpareia.types import ChainType, LifecycleState
 
 
 @dataclass(frozen=True)
@@ -35,16 +36,21 @@ class Chain:
     head_hash: bytes | None  # hash of latest position (None when empty)
     metadata: dict[str, object]
     _store: ChainStore
+    policy_hash: bytes | None = field(default=None)
 
     def append(self, block: Block) -> ChainPosition:
         from synpareia.chain.operations import append_block
 
         return append_block(self, block)
 
-    def verify(self) -> tuple[bool, list[str]]:
+    def verify(
+        self,
+        *,
+        public_keys: dict[str, bytes] | None = None,
+    ) -> tuple[bool, list[str]]:
         from synpareia.chain.operations import verify_chain
 
-        return verify_chain(self)
+        return verify_chain(self, public_keys=public_keys)
 
     def get_position(self, sequence: int) -> ChainPosition | None:
         return self._store.get_position(self.id, sequence)
@@ -76,3 +82,17 @@ class Chain:
         if length == 0:
             return None
         return self._store.get_position(self.id, length)
+
+    @property
+    def policy(self) -> Policy | None:
+        """Parse the POLICY block at position 1; None if missing or malformed."""
+        from synpareia.policy.lifecycle import extract_policy
+
+        return extract_policy(self)
+
+    @property
+    def state(self) -> LifecycleState:
+        """Current lifecycle state (Proposed / Pending / Active / Concluded)."""
+        from synpareia.policy.lifecycle import compute_lifecycle_state
+
+        return compute_lifecycle_state(self)
