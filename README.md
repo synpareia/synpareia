@@ -171,9 +171,10 @@ When two or more agents interact, the shared observable history is a sphere chai
 
 | Function | Description |
 |----------|-------------|
-| `create_chain(profile, chain_type?)` | Create a new chain |
+| `create_chain(profile, *, policy=...)` | Create a new chain. A `policy` is required — use `templates.cop(profile)` for a personal chain, `templates.sphere(a, b)` for a two-party sphere, `templates.audit(...)` for oversight. |
 | `append_block(chain, block)` | Append a block, returns ChainPosition |
-| `verify_chain(chain)` | Walk and verify all hash links |
+| `verify_chain(chain, *, public_keys=...)` | Walk hash links, enforce chain policy, and verify Ed25519 signatures. **Fails closed** if signatures are present but `public_keys` is omitted — structure-only callers should use `verify_chain_structure` instead. |
+| `verify_chain_structure(chain)` | Structural validation only (no signatures, no policy). Explicit opt-in. |
 | `export_chain(chain)` | Export as portable, verifiable JSON |
 | `verify_export(data)` | Verify an export without the original chain |
 
@@ -191,6 +192,98 @@ When two or more agents interact, the shared observable history is a sphere chai
 | `create_commitment(content, nonce?)` | Create a commitment hash |
 | `verify_commitment(hash, content, nonce)` | Verify a commitment reveal |
 | `create_commitment_block(profile, content)` | Create a commitment as a block |
+
+### Chain policy
+
+A chain carries a `Policy` that declares who the signatories are, what
+block types are permitted, and how the chain transitions through
+lifecycle states (Proposed → Pending → Active → Concluded). Use the
+`templates` module for the canonical three shapes:
+
+```python
+from synpareia import create_chain, templates, verify_chain_policy
+
+alice = synpareia.generate()
+chain = create_chain(alice, policy=templates.cop(alice))  # Chain of Presence (single-party)
+
+# For a two-party sphere:
+bob = synpareia.generate()
+sphere = create_chain(alice, policy=templates.sphere(alice, bob))
+
+# Standalone policy validation (no signature check):
+valid, errors = verify_chain_policy(sphere)
+```
+
+`verify_chain` invokes `verify_chain_policy` internally on every
+verification — callers get policy enforcement (permitted block types,
+signatory constraints, lifecycle state) by default.
+
+### Multi-party block proposals
+
+A `BlockProposal` is a shareable draft of a block that multiple parties
+sign before it becomes a full `Block`. Use when two or more agents need
+to jointly commit to a statement that none of them can later disavow.
+
+```python
+from synpareia import start_proposal, sign_proposal, assemble_block
+
+# Alice drafts a block that requires both Alice and Bob's signatures.
+proposal = start_proposal(
+    alice,
+    block_type="message",
+    content="Alice and Bob agree: integration passed.",
+    required_signers={alice.id, bob.id},
+)
+
+# Each party signs in turn.
+proposal = sign_proposal(proposal, alice)
+proposal = sign_proposal(proposal, bob)
+
+# Assembly verifies every signature before producing the final block.
+# public_keys is required — assemble_block refuses to produce an
+# unverified block.
+block = assemble_block(
+    proposal,
+    public_keys={alice.id: alice.public_key, bob.id: bob.public_key},
+)
+
+# The resulting block carries Alice as the primary signer and Bob in
+# co_signatures; both bindings are committed to by Alice's signature.
+```
+
+### Threshold commitments (XOR n-of-n)
+
+Reveal-requires-cooperation primitive. Two or more parties each
+contribute a random share; the joint nonce is the XOR of all shares.
+No single party can reveal the committed content without the others'
+cooperation, because none of them knows the joint nonce.
+
+```python
+from synpareia import (
+    create_threshold_commitment,
+    random_shares,
+    verify_threshold_commitment,
+    xor_shares,
+)
+
+content = b"Alice and Bob's sealed assessment"
+
+# Two parties each generate their own 32-byte share.
+alice_share = random_shares(1)[0]
+bob_share = random_shares(1)[0]
+
+# Commit jointly — neither party alone can open this.
+commitment = create_threshold_commitment(content, [alice_share, bob_share])
+
+# Later, to reveal: both shares are contributed.
+joint_nonce = xor_shares([alice_share, bob_share])
+assert verify_threshold_commitment(commitment, content, [alice_share, bob_share])
+```
+
+`create_threshold_commitment` rejects share-sets that XOR to an
+all-zero joint nonce (catches duplicate shares or accidentally
+collapsed entropy). `random_shares` enforces a 16-byte minimum
+share length.
 
 ### Types
 

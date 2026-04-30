@@ -1,4 +1,9 @@
-"""Property-based tests for anchor invariants."""
+"""Property-based tests for anchor invariants.
+
+Under v0.3, every chain has a POLICY genesis block at position 1 —
+appended targets land at sequence 2+, so tests must use the returned
+ChainPosition rather than hardcoded sequences.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,8 @@ from hypothesis import strategies as st
 import synpareia
 from synpareia.anchor import create_anchor_block
 from synpareia.anchor.verify import verify_anchor
-from synpareia.types import AnchorType, BlockType, ChainType
+from synpareia.policy import templates
+from synpareia.types import AnchorType, BlockType
 
 
 class TestAnchorProperties:
@@ -19,17 +25,18 @@ class TestAnchorProperties:
     def test_anchor_round_trip_always_verifies(self, message: str) -> None:
         """Creating an anchor and immediately verifying it should always succeed."""
         profile = synpareia.generate()
-        source = synpareia.create_chain(profile)
-        target = synpareia.create_chain(profile, ChainType.SPHERE)
+        profile_b = synpareia.generate()
+        source = synpareia.create_chain(profile, policy=templates.cop(profile))
+        target = synpareia.create_chain(profile, policy=templates.sphere(profile, profile_b))
 
         block = synpareia.create_block(profile, BlockType.MESSAGE, message)
-        target.append(block)
+        target_pos = target.append(block)
 
         anchor_block, _ = create_anchor_block(
             profile,
             source,
             target_chain_id=target.id,
-            target_sequence=1,
+            target_sequence=target_pos.sequence,
             target_block_hash=block.content_hash,
         )
 
@@ -41,11 +48,12 @@ class TestAnchorProperties:
     def test_wrong_hash_always_fails(self, fake_hash: bytes) -> None:
         """An anchor with a wrong target_block_hash should never verify."""
         profile = synpareia.generate()
-        source = synpareia.create_chain(profile)
-        target = synpareia.create_chain(profile, ChainType.SPHERE)
+        profile_b = synpareia.generate()
+        source = synpareia.create_chain(profile, policy=templates.cop(profile))
+        target = synpareia.create_chain(profile, policy=templates.sphere(profile, profile_b))
 
         block = synpareia.create_block(profile, BlockType.MESSAGE, "real content")
-        target.append(block)
+        target_pos = target.append(block)
 
         # Only test when fake_hash differs from real hash
         if fake_hash == block.content_hash:
@@ -55,7 +63,7 @@ class TestAnchorProperties:
             profile,
             source,
             target_chain_id=target.id,
-            target_sequence=1,
+            target_sequence=target_pos.sequence,
             target_block_hash=fake_hash,
         )
 
@@ -74,22 +82,23 @@ class TestAnchorProperties:
     def test_multi_anchor_verify(self, messages: list[str], anchor_type: AnchorType) -> None:
         """Multiple anchors to different positions should all verify."""
         profile = synpareia.generate()
-        source = synpareia.create_chain(profile)
-        target = synpareia.create_chain(profile, ChainType.SPHERE)
+        profile_b = synpareia.generate()
+        source = synpareia.create_chain(profile, policy=templates.cop(profile))
+        target = synpareia.create_chain(profile, policy=templates.sphere(profile, profile_b))
 
+        appended: list[tuple[int, bytes]] = []
         for msg in messages:
             block = synpareia.create_block(profile, BlockType.MESSAGE, msg)
-            target.append(block)
+            pos = target.append(block)
+            appended.append((pos.sequence, block.content_hash))
 
-        for i, _msg in enumerate(messages):
-            target_block = target.get_block(i + 1)
-            assert target_block is not None
+        for seq, content_hash in appended:
             anchor_block, _ = create_anchor_block(
                 profile,
                 source,
                 target_chain_id=target.id,
-                target_sequence=i + 1,
-                target_block_hash=target_block.content_hash,
+                target_sequence=seq,
+                target_block_hash=content_hash,
                 anchor_type=anchor_type,
             )
             valid, err = verify_anchor(anchor_block, target)

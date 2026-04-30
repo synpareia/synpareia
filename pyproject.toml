@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "synpareia"
-version = "0.2.0"
+version = "0.3.0"
 description = "Cryptographic primitives for AI agent identity, attestation, and interaction verification"
 readme = "README.md"
 license = "Apache-2.0"
@@ -45,6 +45,11 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
+# Tests are excluded from strict type-checking. Fixtures, parametrize arguments,
+# and Hypothesis strategies naturally use Any/loose types; pytest itself is the
+# correctness gate for tests. Strict mode remains on the shipping library surface
+# under src/, which is the contract to downstream users.
+exclude = ["tests/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

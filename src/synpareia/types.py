@@ -19,6 +19,18 @@ class BlockType(StrEnum):
     SEAL = "seal"
     STATE = "state"
     MEDIA = "media"
+    POLICY = "policy"
+    ACCEPTANCE = "acceptance"
+    ACK = "ack"
+    AMENDMENT = "amendment"
+    CONCLUSION = "conclusion"
+
+
+class LifecycleState(StrEnum):
+    PROPOSED = "proposed"
+    PENDING = "pending"
+    ACTIVE = "active"
+    CONCLUDED = "concluded"
 
 
 class ChainType(StrEnum):

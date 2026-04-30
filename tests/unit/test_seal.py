@@ -269,10 +269,12 @@ class TestCreateSealBlock:
 
     def test_seal_block_appendable_to_chain(self) -> None:
         """Seal blocks can be appended to any chain."""
+        from synpareia.policy import templates
+
         profile = generate()
         witness = generate()
 
-        chain = synpareia.create_chain(profile)
+        chain = synpareia.create_chain(profile, policy=templates.cop(profile))
         seal = create_seal(
             witness.private_key,
             witness.id,
@@ -282,8 +284,9 @@ class TestCreateSealBlock:
         block = create_seal_block(seal)
         pos = chain.append(block)
 
-        assert pos.sequence == 1
-        assert chain.length == 1
+        # Position 1 is the POLICY genesis block; seal lands at 2.
+        assert pos.sequence == 2
+        assert chain.length == 2
 
     def test_state_seal_block_metadata(self) -> None:
         witness = generate()

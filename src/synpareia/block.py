@@ -25,6 +25,9 @@ class Block:
     content: bytes | None = None
     signature: bytes | None = None
     metadata: dict[str, object] = field(default_factory=dict)
+    # Co-signatures for multi-party blocks. Each entry is (signer_did, signature);
+    # empty for single-author blocks. Signatures cover _signing_envelope(block).
+    co_signatures: tuple[tuple[str, bytes], ...] = ()
 
     @property
     def content_mode(self) -> ContentMode:
@@ -34,13 +37,25 @@ class Block:
 
 
 def _signing_envelope(block: Block) -> dict[str, str]:
-    """Build the canonical signing envelope for a block."""
+    """Build the canonical signing envelope for a block.
+
+    Includes:
+    - Block identity, type, author, content hash, timestamp (always).
+    - ``metadata_hash``: SHA-256 of the JCS-canonicalised metadata dict,
+      so post-signing metadata tampering invalidates the signature.
+    - ``cosigners_hash``: SHA-256 of the JCS-canonicalised sorted list
+      of cosigner DIDs, so the primary signature commits to the set of
+      cosigners and rejects post-assembly cosig injection.
+    """
+    cosigner_dids = sorted(did for did, _ in block.co_signatures)
     return {
         "id": block.id,
         "type": str(block.type),
         "author_id": block.author_id,
         "content_hash": block.content_hash.hex(),
         "created_at": block.created_at.isoformat(),
+        "metadata_hash": compute_content_hash(jcs_canonicalize(block.metadata)).hex(),
+        "cosigners_hash": compute_content_hash(jcs_canonicalize(cosigner_dids)).hex(),
     }
 
 
@@ -93,6 +108,7 @@ def create_block(
             content=block.content,
             signature=sig,
             metadata=block.metadata,
+            co_signatures=block.co_signatures,
         )
 
     return block
@@ -116,24 +132,43 @@ def reveal_block(block: Block, content: bytes | str) -> Block:
         content=content_bytes,
         signature=block.signature,
         metadata=block.metadata,
+        co_signatures=block.co_signatures,
     )
 
 
-def verify_block(block: Block, author_public_key: bytes | None = None) -> bool:
-    """Verify block integrity: content hash and signature."""
+def verify_block(
+    block: Block,
+    author_public_key: bytes | None = None,
+    *,
+    cosigner_public_keys: dict[str, bytes] | None = None,
+) -> bool:
+    """Verify block integrity: content hash, author signature, and co-signatures.
+
+    `cosigner_public_keys` maps DID to public key for each co-signer. When
+    omitted, co-signatures are not verified (callers that care must pass
+    the mapping).
+    """
     # Verify content hash if content is present
     if block.content is not None:
         computed = compute_content_hash(block.content)
         if computed != block.content_hash:
             return False
 
-    # Verify signature if present
+    envelope = _signing_envelope(block)
+    canonical = jcs_canonicalize(envelope)
+
+    # Verify primary signature if present
     if block.signature is not None:
         if author_public_key is None:
             return False
-        envelope = _signing_envelope(block)
-        canonical = jcs_canonicalize(envelope)
         if not ed25519_verify(author_public_key, canonical, block.signature):
             return False
+
+    # Verify each co-signature if a mapping is supplied
+    if cosigner_public_keys is not None:
+        for signer_did, sig in block.co_signatures:
+            key = cosigner_public_keys.get(signer_did)
+            if key is None or not ed25519_verify(key, canonical, sig):
+                return False
 
     return True

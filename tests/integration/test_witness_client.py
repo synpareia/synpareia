@@ -13,6 +13,7 @@ import pytest
 import pytest_asyncio
 
 import synpareia
+from synpareia.policy import templates
 from synpareia.seal.verify import verify_seal
 from synpareia.witness.client import WitnessClient
 
@@ -22,6 +23,7 @@ if _witness_src.is_dir():
     sys.path.insert(0, str(_witness_src))
 
 try:
+    import slowapi  # noqa: F401, E402
     from witness.config import WitnessConfig  # noqa: F401, E402
 
     HAS_WITNESS_SERVICE = True
@@ -29,7 +31,8 @@ except ImportError:
     HAS_WITNESS_SERVICE = False
 
 pytestmark = pytest.mark.skipif(
-    not HAS_WITNESS_SERVICE, reason="Witness service not available (standalone SDK repo)"
+    not HAS_WITNESS_SERVICE,
+    reason="Witness service not available (standalone SDK repo, or witness deps not in SDK venv)",
 )
 
 
@@ -68,7 +71,7 @@ async def test_full_workflow(client: WitnessClient) -> None:
     """End-to-end: create chain, request seal, verify offline."""
     # Create a profile and chain
     profile = synpareia.generate()
-    chain = synpareia.create_chain(profile)
+    chain = synpareia.create_chain(profile, policy=templates.cop(profile))
 
     # Add a block
     block = synpareia.create_block(profile, "message", "Hello, witness!")
@@ -78,8 +81,8 @@ async def test_full_workflow(client: WitnessClient) -> None:
     info = await client.get_witness_info()
     assert info.witness_id.startswith("did:synpareia:")
 
-    # Request a timestamp seal on the block
-    seal = await client.timestamp_seal(profile.id, block.content_hash)
+    # Request a timestamp seal on the block (no requester identity sent)
+    seal = await client.timestamp_seal(block.content_hash)
     assert seal.seal_type == "timestamp"
     assert seal.target_block_hash == block.content_hash
 
@@ -90,10 +93,11 @@ async def test_full_workflow(client: WitnessClient) -> None:
     # Append seal to chain as a seal block
     seal_block = synpareia.create_seal_block(seal)
     chain.append(seal_block)
-    assert chain.length == 2
+    # POLICY (genesis) + message + seal = 3
+    assert chain.length == 3
 
     # Request a state seal on the chain
-    state_seal = await client.state_seal(profile.id, chain.id, chain.head_hash)
+    state_seal = await client.state_seal(chain.id, chain.head_hash)
     assert state_seal.seal_type == "state"
     assert state_seal.target_chain_id == chain.id
     assert state_seal.target_chain_head == chain.head_hash
@@ -135,7 +139,7 @@ async def test_blind_conclusion_flow(client: WitnessClient) -> None:
 async def test_liveness_challenge(client: WitnessClient) -> None:
     """Request and respond to a liveness challenge."""
     profile = synpareia.generate()
-    chain = synpareia.create_chain(profile)
+    chain = synpareia.create_chain(profile, policy=templates.cop(profile))
 
     # Request challenge
     challenge = await client.request_challenge(profile.id, chain.id)
