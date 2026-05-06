@@ -366,6 +366,18 @@ wheels = [
 ]
 
 [[package]]
+name = "http-message-signatures"
+version = "2.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/80/95/083707b15af3bdbb6c9e54ae7f448046f7ab55f9eaa5cccdc5dd23791d15/http_message_signatures-2.0.1.tar.gz", hash = "sha256:394545b0cc296a4fd45166f57056e7e029dcd5b91d9bf549e108c96c23aa1cba", size = 30517, upload-time = "2026-01-19T04:01:07.277Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8a/4a/c778016e3a9c18f283b401319346a980f3ff9556c674afa89a22b9e756bb/http_message_signatures-2.0.1-py3-none-any.whl", hash = "sha256:2b2c463f5d077d3081f27770e8017762d5969a1f17e1dc89e8b96a57c44e8a5e", size = 28204, upload-time = "2026-01-19T04:01:05.738Z" },
+]
+
+[[package]]
 name = "httpcore"
 version = "1.0.9"
 source = { registry = "https://pypi.org/simple" }
@@ -862,10 +874,11 @@ wheels = [
 
 [[package]]
 name = "synpareia"
-version = "0.3.0"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
+    { name = "http-message-signatures" },
 ]
 
 [package.optional-dependencies]
@@ -881,6 +894,9 @@ dev = [
     { name = "ruff" },
     { name = "sqlalchemy" },
 ]
+profile = [
+    { name = "httpx" },
+]
 sqlite = [
     { name = "aiosqlite" },
 ]
@@ -894,7 +910,9 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'sqlite'", specifier = ">=0.20" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.115" },
+    { name = "http-message-signatures", specifier = ">=2.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'profile'", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'witness'", specifier = ">=0.27" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10" },
@@ -904,7 +922,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9" },
     { name = "sqlalchemy", marker = "extra == 'dev'", specifier = ">=2.0" },
 ]
-provides-extras = ["sqlite", "witness", "dev"]
+provides-extras = ["sqlite", "witness", "profile", "dev"]
 
 [[package]]
 name = "tomli"

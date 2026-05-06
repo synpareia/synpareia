@@ -5,6 +5,50 @@ All notable changes to the synpareia SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-06
+
+RFC 9421 HTTP Message Signatures + the `synpareia.profile` module for publishing and fetching agent cards on the directory. Phase 1a + Phase 1f of the funnel-implementation-roadmap.
+
+### Added
+
+- **`synpareia.auth.rfc9421`** — Ed25519 sign/verify wrapper over `http-message-signatures`. `sign_request(method, target_uri, body, private_key, keyid, ...)` returns the canonical `Signature-Input` / `Signature` / `Content-Digest` headers with `tag="synpareia"` for domain separation. `verify_request(...)` returns `(valid, [SignatureVerifyError])` with structured codes (`missing_signature` / `unknown_keyid` / `content_digest_mismatch` / `expired` / `signature_invalid` / `wrong_algorithm` / `malformed_signature`). Default-covered components are `("@method", "@target-uri", "content-digest")`. Header lookups are case-insensitive (Starlette / FastAPI lowercase inbound headers; the wrapper canonicalises them before the upstream library checks for `Signature-Input` etc.).
+- **`synpareia.profile`** — consumer-side surface for the directory's `/api/v2/profiles` and `/agents/{did}/.well-known/agent-card.json` routes. Local helpers (no network):
+  - `build_agent_card(profile, **fields) -> AgentCard` — assembles a card from a `synpareia.identity.Profile` plus optional A2A and synpareia-extension fields. Derives the DID from `profile.public_key` and refuses inconsistent Profile inputs (DID-binding enforcement).
+  - `card_canonical_bytes(card) -> bytes` — JCS canonicalisation; the bytes operators sign and the directory verifies.
+  - `sign_agent_card(card_bytes, private_key) -> bytes` — Ed25519 signature.
+  - `verify_agent_card(card_bytes, signature, public_key) -> bool` — offline verification.
+- **AgentCard wire shape** as plain frozen dataclasses (no pydantic dependency in the SDK; the directory validates on publish): `AgentCard`, `SynpareiaExtensions`, `FirstContactFee`, `PersistenceOptIn`, `WellKnownPublicationPolicy`, `A2ACapabilities`, `A2AAuthentication`. Same JSON wire shape as the main service's pydantic schema. `WellKnownPublicationPolicy()` is the explicit opt-out (empty list); omit the policy block entirely to get default visibility (`name`/`description`/`version`).
+- **`ProfileClient` / `SyncProfileClient`** (`synpareia[profile]` extra; httpx-backed) — async + sync directory clients. Methods: `publish` (POST envelope + RFC 9421 sigauth), `get_existence` (fixed-shape view), `get_history` (cursor-paginated), `get_well_known` (A2A discovery surface), `delete_history_version` (sigauth'd tombstone), `delete_profile` (sigauth'd full delete), `request_witness_anchor` (hash-only timestamp seal — witness never sees the DID, the card content, or any operator identifier). Sigauth flows through `synpareia.auth.rfc9421.sign_request`.
+
+### Notes
+
+- **Pydantic-free SDK.** The dataclasses' `to_dict()` produces the same JSON the main-service pydantic `AgentCard` accepts on publish. Consumers don't need pydantic; the directory does its own validation.
+- **Witness anchoring is hash-only by construction.** `ProfileClient.request_witness_anchor` sends only `SHA-256(signed_card_bytes)` to `/api/v1/seals/timestamp`. The hash-only contract is regression-tested.
+- **Deps:** new transitive deps `http-message-signatures>=2.0` (Apache-2.0) for sigauth and `httpx>=0.27` (BSD-3-Clause; already a dep of the `witness` extra) for the network client. Both audited via `pip-audit` — no known vulnerabilities.
+
+## [0.4.0] - 2026-05-05
+
+KEY_ROTATION block — track which Ed25519 key currently controls a DID over time.
+Phase 0.2 of the funnel-implementation-roadmap; the last item closing out Phase 0.
+
+### Added
+
+- **`BlockType.KEY_ROTATION`** — new block type declaring a transition in the active controlling key for a DID.
+- **`synpareia.policy.key_rotation`** module:
+  - `KeyRotationPayload` dataclass — typed handle for the structured rotation payload (`did`, `old_key`, `new_key`, `rotated_at`).
+  - `create_key_rotation_block(profile, *, new_public_key)` — mints a KEY_ROTATION block signed by the old private key. Rejects no-op rotations (new key identical to old) and wrong-length keys. Profile must hold the current private key.
+  - `parse_key_rotation_payload(block) -> KeyRotationPayload | None` — decodes the payload and rejects malformed JSON, wrong `kind`, malformed base64, wrong key length, unparseable timestamps.
+  - `verify_key_rotation_block(block, *, expected_old_key) -> (bool, errors)` — single-block validation; checks payload shape, old-key match, signature against expected_old_key, no-op rejection.
+  - `resolve_did_key(chain, did, *, initial_key) -> bytes | None` — walks the chain forward from a known starting key, applies each KEY_ROTATION authored by the DID, returns the current controlling key. Returns `None` on any signature mismatch or payload break (fail-closed).
+- All five names re-exported from the top-level `synpareia` namespace.
+
+### Notes
+
+- The synpareia DID is permanent — derived from the *original* public key (`did = "did:synpareia:" + sha256(original_pk).hex()`). KEY_ROTATION blocks track who *currently controls* signing rights for that DID; the DID itself doesn't change.
+- v1 KEY_ROTATION blocks are signed only by the old key. The new key's first valid use after the rotation is implicit consent — no co-signature requirement. Callers wanting stronger acknowledgement can layer a BlockProposal envelope.
+- **Key-loss is intentionally terminal under v1.** Without the old private key, no valid KEY_ROTATION block can be minted; there is no v1-defined recovery path. M-of-N social recovery, witness-attested re-attestation, etc. are out of scope. See `docs/explorations/chain-policy-primitive.md` §7 for the long-term recovery strategy.
+- Per the roadmap's `simplicity-NC2` note: no key has actually been rotated pre-launch. KEY_ROTATION ships now to lock in the design surface and unblock Phase 1's signature-auth model under the rotation chain — but the lifecycle path doesn't actually run until post-launch. 24 unit tests cover the protocol; first real exercise will be a launch-week dojo scenario.
+
 ## [0.3.0] - 2026-04-21
 
 Chain policy primitive, multi-party negotiation, threshold commitments, and witness ephemeral attestations. Two red-team passes with all CRITICAL/HIGH findings fixed. Pre-publish gate close-read (2026-04-30) added: `SyncWitnessClient` deprecation fix (E9), `AmendmentRules` serialization made path-collision-safe, `from_public_key` validates 32-byte input.

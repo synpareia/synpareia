@@ -24,6 +24,7 @@ class BlockType(StrEnum):
     ACK = "ack"
     AMENDMENT = "amendment"
     CONCLUSION = "conclusion"
+    KEY_ROTATION = "key_rotation"
 
 
 class LifecycleState(StrEnum):

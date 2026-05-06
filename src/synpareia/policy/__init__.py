@@ -12,6 +12,13 @@ from synpareia.policy.envelope import (
     conclusion_bytes,
     conclusion_payload,
 )
+from synpareia.policy.key_rotation import (
+    KeyRotationPayload,
+    create_key_rotation_block,
+    parse_key_rotation_payload,
+    resolve_did_key,
+    verify_key_rotation_block,
+)
 from synpareia.policy.lifecycle import (
     accepted_signatories,
     compute_lifecycle_state,
@@ -42,6 +49,7 @@ __all__ = [
     "AmendmentOverride",
     "AmendmentRules",
     "GdprMetadata",
+    "KeyRotationPayload",
     "LifecycleState",
     "PerBlockRule",
     "Policy",
@@ -59,11 +67,15 @@ __all__ = [
     "compute_lifecycle_state",
     "conclusion_bytes",
     "conclusion_payload",
+    "create_key_rotation_block",
     "extract_policy",
+    "parse_key_rotation_payload",
     "policy_canonical_bytes",
     "policy_from_dict",
     "policy_hash",
     "policy_to_dict",
+    "resolve_did_key",
     "templates",
     "verify_chain_policy",
+    "verify_key_rotation_block",
 ]
