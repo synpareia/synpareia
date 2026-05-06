@@ -19,6 +19,7 @@ from synpareia.policy import (
     AmendmentOverride,
     AmendmentRules,
     GdprMetadata,
+    KeyRotationPayload,
     LifecycleState,
     PerBlockRule,
     Policy,
@@ -35,12 +36,16 @@ from synpareia.policy import (
     compute_lifecycle_state,
     conclusion_bytes,
     conclusion_payload,
+    create_key_rotation_block,
+    parse_key_rotation_payload,
     policy_canonical_bytes,
     policy_from_dict,
     policy_hash,
     policy_to_dict,
+    resolve_did_key,
     templates,
     verify_chain_policy,
+    verify_key_rotation_block,
 )
 from synpareia.proposal import (
     BlockProposal,
@@ -60,7 +65,7 @@ from synpareia.threshold import (
 )
 from synpareia.types import AnchorType, BlockType, ChainType, ContentMode, SealType
 
-__version__ = "0.3.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "AmendmentOverride",
@@ -76,6 +81,7 @@ __all__ = [
     "ChainType",
     "ContentMode",
     "GdprMetadata",
+    "KeyRotationPayload",
     "LifecycleState",
     "MemoryStore",
     "PerBlockRule",
@@ -106,6 +112,7 @@ __all__ = [
     "create_chain",
     "create_commitment",
     "create_commitment_block",
+    "create_key_rotation_block",
     "create_seal",
     "create_seal_block",
     "create_threshold_commitment",
@@ -114,11 +121,13 @@ __all__ = [
     "from_public_key",
     "generate",
     "jcs_canonicalize",
+    "parse_key_rotation_payload",
     "policy_canonical_bytes",
     "policy_from_dict",
     "policy_hash",
     "policy_to_dict",
     "random_shares",
+    "resolve_did_key",
     "reveal_block",
     "sign",
     "sign_proposal",
@@ -133,6 +142,7 @@ __all__ = [
     "verify_commitment",
     "verify_export",
     "verify_export_structure",
+    "verify_key_rotation_block",
     "verify_proposal",
     "verify_seal",
     "verify_threshold_commitment",
