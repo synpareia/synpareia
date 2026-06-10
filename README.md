@@ -56,15 +56,18 @@ assert synpareia.verify_block(block, profile.public_key)
 A chain is an ordered, hash-linked sequence of blocks — a tamper-evident history.
 
 ```python
-# Create a Chain of Presence (personal history)
-chain = synpareia.create_chain(profile)
+# Create a Chain of Presence (personal history).
+# Every chain carries a policy — templates.cop() is the personal-history shape.
+chain = synpareia.create_chain(profile, policy=synpareia.templates.cop(profile))
 
 # Append blocks
+another_block = synpareia.create_block(profile, type="message", content="Hello again")
 pos1 = synpareia.append_block(chain, block)
 pos2 = synpareia.append_block(chain, another_block)
 
-# Verify the chain is intact
-valid, errors = synpareia.verify_chain(chain)
+# Verify the chain is intact. Verification fails closed: signed blocks
+# require the authors' public keys.
+valid, errors = synpareia.verify_chain(chain, public_keys={profile.id: profile.public_key})
 assert valid
 ```
 
@@ -78,8 +81,8 @@ from synpareia import export_chain, verify_export
 # Export
 data = export_chain(chain)
 
-# Anyone can verify — no network, no trust, just math
-valid, errors = verify_export(data)
+# Anyone with the authors' public keys can verify — no network, no trust, just math
+valid, errors = verify_export(data, public_keys={profile.id: profile.public_key})
 assert valid
 ```
 
@@ -88,12 +91,18 @@ assert valid
 When an agent participates in a shared conversation, anchors link their personal chain to the shared record.
 
 ```python
-# Agent A's personal chain references a position in the shared chain
+# A peer keeps the shared record on their own chain...
+peer = synpareia.generate()
+shared_chain = synpareia.create_chain(peer, policy=synpareia.templates.cop(peer))
+shared_block = synpareia.create_block(peer, type="message", content="shared record")
+synpareia.append_block(shared_chain, shared_block)
+
+# ...and Agent A's personal chain references a position in the shared chain
 anchor_block, anchor_pos = synpareia.create_anchor_block(
     profile,
-    agent_chain,
+    chain,
     target_chain_id=shared_chain.id,
-    target_sequence=3,
+    target_sequence=2,
     target_block_hash=shared_block.content_hash,
     anchor_type="correspondence",
 )
@@ -164,7 +173,7 @@ When two or more agents interact, the shared observable history is a sphere chai
 | Function | Description |
 |----------|-------------|
 | `create_block(profile, type, content)` | Create a signed block |
-| `verify_block(block, public_key?)` | Verify content hash and signature |
+| `verify_block(block, public_key?)` | Verify content hash and signature. **Fails closed**: with a key, the block must carry a signature that verifies against it; with no key, it's an explicit structure-only check (signed blocks fail) |
 | `reveal_block(block, content)` | Reveal content of a hash-only block |
 
 ### Chains
@@ -230,7 +239,7 @@ from synpareia import start_proposal, sign_proposal, assemble_block
 # Alice drafts a block that requires both Alice and Bob's signatures.
 proposal = start_proposal(
     alice,
-    block_type="message",
+    type="message",
     content="Alice and Bob agree: integration passed.",
     required_signers={alice.id, bob.id},
 )
@@ -268,15 +277,14 @@ from synpareia import (
 
 content = b"Alice and Bob's sealed assessment"
 
-# Two parties each generate their own 32-byte share.
-alice_share = random_shares(1)[0]
-bob_share = random_shares(1)[0]
+# Each party holds their own 32-byte share (generated together here for brevity).
+alice_share, bob_share = random_shares(2)
 
 # Commit jointly — neither party alone can open this.
-commitment = create_threshold_commitment(content, [alice_share, bob_share])
+commitment, joint_nonce = create_threshold_commitment(content, [alice_share, bob_share])
 
 # Later, to reveal: both shares are contributed.
-joint_nonce = xor_shares([alice_share, bob_share])
+assert xor_shares([alice_share, bob_share]) == joint_nonce
 assert verify_threshold_commitment(commitment, content, [alice_share, bob_share])
 ```
 

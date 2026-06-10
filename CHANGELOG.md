@@ -5,6 +5,123 @@ All notable changes to the synpareia SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-06-10
+
+Launch-hardening release driven by the 2026-06-10 fresh-eyes audit (defect IDs
+D-1, D-7, D-8). Minor bump under the pre-1.0 SemVer caveat: two behaviour
+changes below are breaking for callers who relied on fail-open or
+RFC-violating output — both are documented under **Breaking** with migration
+notes. Also ships the new (experimental) `synpareia.topology` module.
+
+> **Upgrading from 0.5.0?** The 0.5.1 entry below also applies to you:
+> 0.5.1 was documented and version-bumped but **never published to PyPI**
+> (the published sequence is 0.5.0 → 0.6.0), so its PT-001/002/003
+> hardening first ships in this release.
+
+### Breaking
+
+- **`verify_block` now fails closed when an author key is supplied (D-1).**
+  Previously a block with `signature is None` returned `True` from
+  `verify_block(block, author_public_key)` — only the content hash was
+  checked, so a signature-stripped block still "verified" as authored. New
+  semantics: when `author_public_key` is supplied, the block MUST carry a
+  primary signature that verifies against that key; an unsigned block does
+  not verify. **Migration:** callers that relied on unsigned blocks passing
+  an authored-verification call must either (a) sign the blocks, or (b) pass
+  `author_public_key=None` to request an explicit structure-only check
+  (content hash + co-signatures when a mapping is passed) — that path is
+  unchanged. No transitional `DeprecationWarning` release: the fail-open
+  behaviour was a security defect (the sibling of the `verify_chain`
+  fail-open bug fixed earlier), and a warning-but-still-passing release
+  would have preserved the vulnerability. Regression tests cover stripped
+  signatures, never-signed blocks, structure-only mode, and co-signatures
+  not compensating for a stripped primary.
+- **Integers outside ±2^53 in canonicalized content now raise `ValueError`
+  per RFC 8785 (previously produced RFC-violating output).** The old
+  home-rolled canonicalizer serialized large ints via `str()`, emitting
+  bytes that violate RFC 8785's number rules (so third-party JCS
+  implementations could not reproduce our hashes). The new `rfc8785`-backed
+  implementation raises `rfc8785.IntegerDomainError` (a `ValueError`
+  subclass). **Migration:** use string timestamps (e.g. ISO 8601) or
+  millisecond-precision integer timestamps; any integer with magnitude
+  below 2^53 is unaffected.
+
+### Added
+
+- **Floats now canonicalize** per RFC 8785 / ECMAScript shortest round-trip
+  serialization: `{"confidence": 0.7}` is now signable. Previously any float
+  raised a hard `TypeError` (which bit the Witnessed-Prediction Form).
+  End-to-end sign+verify regression added.
+- **`synpareia.topology`** — experimental v0 (in-memory) topology layer:
+  pairwise directional edges between DIDs. Public surface: `EdgePair`,
+  `TopologyStore`, `shortest_path`, `path_familiarity`, `path_strength`,
+  per-channel accumulators, the tag→channel-delta mapper, the contribution
+  ledger (erasure support), and the anchored transitive reputation aggregate
+  (`aggregate_reputation`, bounded-hop path discount, precision-weighted
+  combine) with visibility-class bucketing. Production substrate (directory
+  DB integration, witness hooks, MCP exposure) lands as separate work; treat
+  this module's API as unstable until then. **No network read surface serves
+  these aggregates anywhere today** — this is library code you can run on
+  your own data, not a hosted reputation feed. One known design gap shipped
+  as-is (tracked, pre-consumer): the transitive *familiarity* walk in
+  `transitive_author_weights` is not yet visibility-filtered (only valence
+  opinions are), so a served aggregate could leak the existence/strength of
+  bilateral edges through reachability effects. Do **not** build a serving
+  surface on this module until that is resolved (audit D-11; the resolution
+  gates any consumer).
+
+### Changed
+
+- **Canonicalization is now backed by the `rfc8785` library** (Trail of
+  Bits, Apache-2.0, py.typed) instead of the home-rolled implementation in
+  `synpareia.hash` (D-8). `jcs_canonicalize` remains as a thin wrapper, so
+  call sites don't churn. **Hash compatibility:** a hypothesis differential
+  suite runs the old implementation (kept verbatim in the test module as the
+  oracle) against the new one over the old code's accepted domain — output
+  is byte-identical for str/int/bool/None/list/dict with safe-range ints and
+  BMP keys, so every existing chain, seal, and signature verifies unchanged.
+- **Supplementary-plane dict keys now sort in UTF-16 code-unit order** as
+  RFC 8785 requires (previously code-point order — RFC drift). Only affects
+  keys containing characters above U+FFFF. Consequence for pre-0.6.0
+  artifacts: a signature or hash produced by the old implementation over
+  content whose dict keys mix supplementary-plane characters will fail
+  verification under 0.6.0 (fail-closed, never silently different) — if you
+  hold such artifacts (none are known to exist in the ecosystem), re-sign
+  under 0.6.0.
+
+### Fixed
+
+- **README quickstart repaired (D-7):** every code block now runs
+  top-to-bottom in a clean venv.
+
+### Notes
+
+- New runtime dependency: `rfc8785>=0.1.4` (Apache-2.0).
+- **Honesty note on witness identity binding (audit D-9):** the witness
+  service does not verify the `requester_id` (or challenge `target_id`)
+  strings sent with blind conclusions and liveness challenges — identity
+  binding is the caller's self-asserted claim in v1, until Phase-2 anonymous
+  credentials land. The `synpareia.witness.client` docstrings now say so
+  explicitly. Existing behaviour is unchanged; this is a documentation
+  truth-pass.
+
+## [0.5.1] - 2026-05-06 — never published to PyPI; first ships in 0.6.0
+
+Defence-in-depth tightening of `synpareia.profile.client` and `synpareia.auth.rfc9421` based on the three LOW pentest findings (PT-001/002/003) deferred from the 0.5.0 publish gate. Behaviour-preserving for callers who already pass canonical inputs; fail-fast for callers who don't. Patch release.
+
+### Changed
+
+- **`ProfileClient.publish` cross-checks identity bindings (PT-001).** Raises `ValueError` if `did` is not canonical, if `did` doesn't equal `"did:synpareia:" + sha256(public_key).hex()`, or if the embedded `id` field in `signed_bytes` (when JSON-parseable) disagrees with `did`. The server-side validator remains the real gate; the SDK now refuses to dispatch a request that's guaranteed to be rejected.
+- **`ProfileClient.{publish, get_existence, get_history, get_well_known, delete_history_version, delete_profile}` validate the `did` argument (PT-002).** Each method checks `did` against `^did:synpareia:[0-9a-f]{64}$` before f-string-interpolating into the URL path. Eliminates the `../`-traversal class via the `did` parameter at the SDK boundary.
+- **`sign_request` mints a 128-bit random nonce by default (PT-003).** When `nonce=None`, the wrapper now generates `secrets.token_hex(16)` rather than signing without a nonce. Replay defence is on-by-default rather than opt-in. Callers that need deterministic nonces (tests, content-addressed signatures) can still pass an explicit `nonce` argument. An explicit empty/whitespace `nonce` is rejected with `ValueError` rather than silently producing a signature that `verify_request(require_nonce=True)` will reject as missing.
+- **`verify_request` adds `require_nonce: bool = True` (PT-003).** Default rejects signatures whose `Signature-Input` parameters omit `nonce` with a structured `missing_nonce` error code. The Phase 1d profile router already enforces nonce-tracking on top of `verify_request`; the new default propagates the same expectation to ad-hoc users. Set `False` only when the caller has its own replay defence.
+
+### Notes
+
+- No public-API removals; all changes are additive defaults or stricter validation on existing entry points. Downstream callers that already pass canonical DIDs and matching public keys are unaffected.
+- Adversarial registry entries `ADV-063` / `ADV-064` / `ADV-065` track the regression tests for these findings.
+- The `tag="synpareia"` signature label and JCS canonicalisation are unchanged.
+
 ## [0.5.0] - 2026-05-06
 
 RFC 9421 HTTP Message Signatures + the `synpareia.profile` module for publishing and fetching agent cards on the directory. Phase 1a + Phase 1f of the funnel-implementation-roadmap.
@@ -26,7 +143,7 @@ RFC 9421 HTTP Message Signatures + the `synpareia.profile` module for publishing
 - **Witness anchoring is hash-only by construction.** `ProfileClient.request_witness_anchor` sends only `SHA-256(signed_card_bytes)` to `/api/v1/seals/timestamp`. The hash-only contract is regression-tested.
 - **Deps:** new transitive deps `http-message-signatures>=2.0` (Apache-2.0) for sigauth and `httpx>=0.27` (BSD-3-Clause; already a dep of the `witness` extra) for the network client. Both audited via `pip-audit` — no known vulnerabilities.
 
-## [0.4.0] - 2026-05-05
+## [0.4.0] - 2026-05-05 — never published to PyPI; first shipped in 0.5.0
 
 KEY_ROTATION block — track which Ed25519 key currently controls a DID over time.
 Phase 0.2 of the funnel-implementation-roadmap; the last item closing out Phase 0.

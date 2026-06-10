@@ -21,6 +21,7 @@ from synpareia import (
     BlockProposal,
     assemble_block,
     create_threshold_commitment,
+    sign_proposal,
     start_proposal,
     verify_block,
 )
@@ -422,3 +423,54 @@ class TestPolicyVersionValidated:
         valid, errors = chain.verify(public_keys={profile.id: profile.public_key})
         assert not valid
         assert any("unsupported policy version" in e for e in errors)
+
+
+class TestVerifyBlockFailClosed:
+    """D-1 (fresh-eyes audit 2026-06-10): verify_block must fail closed.
+
+    Prior behaviour skipped the signature check entirely when
+    block.signature was None — a signature-stripped block returned True
+    from verify_block(stripped, author_key). verify_chain learned this
+    exact lesson (F1); this is the sibling fix in block.py.
+    """
+
+    def test_stripped_signature_fails_with_author_key(self, profile: synpareia.Profile) -> None:
+        block = synpareia.create_block(profile, BlockType.MESSAGE, "signed")
+        assert verify_block(block, profile.public_key)
+        stripped = replace(block, signature=None)
+        assert not verify_block(stripped, profile.public_key)
+
+    def test_never_signed_block_fails_with_author_key(self, profile: synpareia.Profile) -> None:
+        block = synpareia.create_block(profile, BlockType.MESSAGE, "unsigned", sign=False)
+        assert not verify_block(block, profile.public_key)
+
+    def test_unsigned_block_without_key_is_structure_only(
+        self, profile: synpareia.Profile
+    ) -> None:
+        """Documented escape hatch: author_public_key=None makes no authorship
+        claim — content hash only. Prior semantics, kept explicit."""
+        block = synpareia.create_block(profile, BlockType.MESSAGE, "unsigned", sign=False)
+        assert verify_block(block)
+
+    def test_signed_block_without_key_still_fails_closed(self, profile: synpareia.Profile) -> None:
+        block = synpareia.create_block(profile, BlockType.MESSAGE, "signed")
+        assert not verify_block(block)
+
+    def test_stripped_primary_with_valid_cosigs_still_fails(
+        self, profile: synpareia.Profile, profile_b: synpareia.Profile
+    ) -> None:
+        """Valid co-signatures must not compensate for a stripped primary."""
+        prop = start_proposal(
+            profile,
+            BlockType.MESSAGE,
+            "joint statement",
+            required_signers={profile.id, profile_b.id},
+        )
+        prop = sign_proposal(prop, profile)
+        prop = sign_proposal(prop, profile_b)
+        keys = {profile.id: profile.public_key, profile_b.id: profile_b.public_key}
+        block = assemble_block(prop, public_keys=keys)
+        assert verify_block(block, profile.public_key, cosigner_public_keys=keys)
+
+        stripped = replace(block, signature=None)
+        assert not verify_block(stripped, profile.public_key, cosigner_public_keys=keys)

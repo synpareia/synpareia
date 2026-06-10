@@ -130,7 +130,12 @@ class WitnessClient:
     async def submit_conclusion(
         self, conclusion_key: str, requester_id: str, commitment_hash: bytes
     ) -> ConclusionStatus:
-        """Submit a commitment to a blind conclusion."""
+        """Submit a commitment to a blind conclusion.
+
+        Note: the witness does not verify ``requester_id`` — identity
+        binding is the caller's self-asserted claim in v1, until Phase-2
+        anonymous credentials land.
+        """
         resp = await self._client.post(
             "/api/v1/conclusions",
             json={
@@ -151,7 +156,12 @@ class WitnessClient:
     async def request_challenge(
         self, target_id: str, chain_id: str | None = None
     ) -> ChallengeInfo:
-        """Request a liveness challenge."""
+        """Request a liveness challenge.
+
+        Note: the witness does not verify ``target_id`` — identity binding
+        is the caller's self-asserted claim in v1, until Phase-2 anonymous
+        credentials land.
+        """
         body: dict[str, str] = {"target_id": target_id}
         if chain_id:
             body["chain_id"] = chain_id
@@ -171,6 +181,11 @@ class WitnessClient:
         """Respond to a liveness challenge.
 
         Returns (passed, seal_id).
+
+        Note: the witness does not verify ``requester_id`` — anyone can
+        answer a challenge under any identity string; identity binding is
+        the caller's self-asserted claim in v1, until Phase-2 anonymous
+        credentials land.
         """
         resp = await self._client.post(
             f"/api/v1/challenges/{challenge_id}/respond",

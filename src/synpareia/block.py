@@ -144,6 +144,17 @@ def verify_block(
 ) -> bool:
     """Verify block integrity: content hash, author signature, and co-signatures.
 
+    Authorship semantics (fail closed, mirroring :func:`verify_chain`):
+
+    - When ``author_public_key`` is supplied, the caller is asserting
+      authorship — the block MUST carry a primary signature that verifies
+      against that key. A block with ``signature is None`` does **not**
+      verify (a signature-stripped block must never pass as authored).
+    - When ``author_public_key`` is ``None``, this is an explicit
+      structure-only check: the content hash is verified, but no authorship
+      claim is made. A *signed* block still fails in this mode, because its
+      signature cannot be verified (fail closed on unverifiable signatures).
+
     `cosigner_public_keys` maps DID to public key for each co-signer. When
     omitted, co-signatures are not verified (callers that care must pass
     the mapping).
@@ -157,12 +168,15 @@ def verify_block(
     envelope = _signing_envelope(block)
     canonical = jcs_canonicalize(envelope)
 
-    # Verify primary signature if present
-    if block.signature is not None:
-        if author_public_key is None:
+    # Verify primary signature — fail closed in both directions:
+    # key supplied but block unsigned, or block signed but no key supplied.
+    if author_public_key is not None:
+        if block.signature is None:
             return False
         if not ed25519_verify(author_public_key, canonical, block.signature):
             return False
+    elif block.signature is not None:
+        return False
 
     # Verify each co-signature if a mapping is supplied
     if cosigner_public_keys is not None:
