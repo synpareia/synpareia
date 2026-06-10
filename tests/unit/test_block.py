@@ -47,6 +47,27 @@ class TestCreateBlock:
         )
         assert block.metadata == meta
 
+    def test_float_metadata_signs_and_verifies(self, profile: synpareia.Profile) -> None:
+        """Regression for audit D-8: float metadata is signable end-to-end.
+
+        The pre-rfc8785 canonicalizer raised TypeError on floats, so a block
+        with ``{"confidence": 0.7}`` metadata could not be signed (this bit
+        the Witnessed-Prediction Form).
+        """
+        block = synpareia.create_block(
+            profile,
+            BlockType.MESSAGE,
+            "prediction",
+            metadata={"confidence": 0.7},
+        )
+        assert block.signature is not None
+        assert synpareia.verify_block(block, profile.public_key)
+        # Tampering with the float metadata invalidates the signature.
+        from dataclasses import replace
+
+        tampered = replace(block, metadata={"confidence": 0.9})
+        assert not synpareia.verify_block(tampered, profile.public_key)
+
     def test_custom_type(self, profile: synpareia.Profile) -> None:
         block = synpareia.create_block(profile, "custom_event", "payload")
         assert block.type == "custom_event"
@@ -132,3 +153,9 @@ class TestVerifyBlock:
     def test_signature_without_public_key_fails(self, profile: synpareia.Profile) -> None:
         block = synpareia.create_block(profile, BlockType.MESSAGE, "test")
         assert not synpareia.verify_block(block)  # no public key provided
+
+    def test_unsigned_block_with_public_key_fails(self, profile: synpareia.Profile) -> None:
+        """Supplying an author key asserts authorship — an unsigned block
+        must fail closed (a stripped signature must never verify)."""
+        block = synpareia.create_block(profile, BlockType.MESSAGE, "test", sign=False)
+        assert not synpareia.verify_block(block, profile.public_key)

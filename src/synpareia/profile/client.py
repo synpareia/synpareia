@@ -21,16 +21,38 @@ import asyncio
 import base64
 import hashlib
 import json
+import re
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from synpareia.auth.rfc9421 import sign_request
+from synpareia.identity import _derive_did
+from synpareia.types import DID_PREFIX
 
 if TYPE_CHECKING:
     from synpareia.seal import SealPayload
 
 __all__ = ["ProfileClient", "SyncProfileClient"]
+
+
+# Canonical synpareia DID shape, pinned at the wrapper boundary (PT-002
+# defence-in-depth) so a caller can't slip a path-traversal segment
+# past the f-string interpolation in client method paths. The
+# server-side validator is the real gate; this is the SDK refusing to
+# dispatch a request the server is going to reject anyway.
+#
+# DID_PREFIX from synpareia.types is the single source of truth for
+# the literal prefix; the trailing hex window is sha256-shaped (64
+# lowercase hex chars, matching identity._derive_did's
+# hashlib.sha256(pk).hexdigest() output).
+_DID_RE = re.compile(rf"^{re.escape(DID_PREFIX)}[0-9a-f]{{64}}$")
+
+
+def _validate_did(did: str) -> None:
+    if not _DID_RE.fullmatch(did):
+        msg = f"did is not a canonical synpareia DID: {did!r}"
+        raise ValueError(msg)
 
 
 class ProfileClient:
@@ -96,7 +118,32 @@ class ProfileClient:
         (``{did, version, card_hash_hex}``). Raises
         ``httpx.HTTPStatusError`` on non-2xx responses; the body's
         structured ``{detail, code}`` is preserved on ``.response``.
+
+        Raises ``ValueError`` (PT-001 / PT-002 defence-in-depth) if
+        ``did`` is not canonical, if ``did`` doesn't match
+        ``"did:synpareia:" + sha256(public_key).hex()``, or if the
+        embedded ``id`` field in ``signed_bytes`` (when parseable)
+        disagrees with ``did``. The server-side validator is the
+        real gate; these checks fail-fast at the SDK layer so the
+        caller doesn't ship a request that's guaranteed to be
+        rejected.
         """
+        _validate_did(did)
+        if did != _derive_did(public_key):
+            msg = (
+                "did argument does not match public_key derivation "
+                "(did = 'did:synpareia:' + sha256(public_key).hex())"
+            )
+            raise ValueError(msg)
+        try:
+            embedded = json.loads(signed_bytes)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            embedded = None
+        if isinstance(embedded, dict) and "id" in embedded and embedded["id"] != did:
+            msg = (
+                f"signed_bytes embedded id {embedded['id']!r} disagrees with did argument {did!r}"
+            )
+            raise ValueError(msg)
         path = f"/api/v2/profiles/{did}"
         body = json.dumps(
             {
@@ -127,7 +174,11 @@ class ProfileClient:
         Returns ``{did, exists, name, description, public_key_b64,
         version}``. Unknown DIDs return ``exists=False`` with the
         same envelope (enumeration-defence).
+
+        Raises ``ValueError`` if ``did`` is not a canonical
+        ``did:synpareia:<64hex>`` (PT-002 defence-in-depth).
         """
+        _validate_did(did)
         resp = await self._client.get(f"/api/v2/profiles/{did}")
         resp.raise_for_status()
         return _ensure_dict(resp.json())
@@ -143,7 +194,12 @@ class ProfileClient:
         limit: int = 50,
         cursor: int | None = None,
     ) -> dict[str, Any]:
-        """Fetch paginated card-version history (newest-first)."""
+        """Fetch paginated card-version history (newest-first).
+
+        Raises ``ValueError`` if ``did`` is not canonical
+        (PT-002 defence-in-depth).
+        """
+        _validate_did(did)
         params: dict[str, Any] = {"limit": limit}
         if cursor is not None:
             params["cursor"] = cursor
@@ -162,7 +218,11 @@ class ProfileClient:
         ``policies.well_known_publication.a2a_standard_fields``;
         synpareia identity layer + rules-of-engagement always
         present. Unknown DIDs return 404.
+
+        Raises ``ValueError`` if ``did`` is not canonical
+        (PT-002 defence-in-depth).
         """
+        _validate_did(did)
         resp = await self._client.get(f"/agents/{did}/.well-known/agent-card.json")
         resp.raise_for_status()
         return _ensure_dict(resp.json())
@@ -185,7 +245,11 @@ class ProfileClient:
         Returns None on success; raises ``httpx.HTTPStatusError``
         with the structured 403 body when persistence opt-in
         blocks the call (``code == "persistence_opt_in"``).
+
+        Raises ``ValueError`` if ``did`` is not canonical
+        (PT-002 defence-in-depth).
         """
+        _validate_did(did)
         path = f"/api/v2/profiles/{did}/history/{version}"
         body = json.dumps(
             {
@@ -221,7 +285,11 @@ class ProfileClient:
         Same persistence-opt-in semantics as
         ``delete_history_version`` — ``card_history`` or
         ``key_chain`` opt-in returns 403.
+
+        Raises ``ValueError`` if ``did`` is not canonical
+        (PT-002 defence-in-depth).
         """
+        _validate_did(did)
         path = f"/api/v2/profiles/{did}"
         body = json.dumps(
             {

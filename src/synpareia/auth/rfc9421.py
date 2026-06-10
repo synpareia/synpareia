@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -211,9 +212,13 @@ def sign_request(
 
     The covered components are fixed at ``DEFAULT_COMPONENTS``
     (``@method``, ``@target-uri``, ``content-digest``). The signature
-    parameters always include ``created`` (= now) and ``expires``
-    (= now + ``expires_in_seconds``); ``nonce`` is included if
-    supplied (callers wanting replay protection should always set it).
+    parameters always include ``created`` (= now), ``expires`` (= now
+    + ``expires_in_seconds``), and a ``nonce``. If the caller does
+    not supply one, ``sign_request`` mints a 128-bit cryptographically
+    random nonce (``secrets.token_hex(16)``) — replay defence is
+    on-by-default rather than opt-in (PT-003 footgun fix). Pass an
+    explicit ``nonce`` only when the caller has its own determinism
+    requirement.
 
     ``private_key`` is 32 bytes of raw Ed25519 private-key material.
     ``keyid`` is opaque to this module — usually a DID or a key
@@ -222,6 +227,18 @@ def sign_request(
     """
     if len(private_key) != 32:
         msg = f"sign_request: private_key must be 32 bytes, got {len(private_key)}"
+        raise ValueError(msg)
+
+    if nonce is None:
+        nonce = secrets.token_hex(16)
+    elif not nonce.strip():
+        # Caller passed nonce="" or whitespace. Treating that as
+        # "no nonce" would produce a signature ``verify_request``
+        # rejects (require_nonce=True falsy-checks the parameter),
+        # so the wrapper-to-wrapper round trip would silently fail.
+        # Reject explicitly with a clearer message than the verifier
+        # would surface.
+        msg = "sign_request: nonce, if provided, must be non-empty (pass None to auto-generate)"
         raise ValueError(msg)
 
     digest = _content_digest(body)
@@ -264,6 +281,7 @@ def verify_request(
     public_key_resolver: Callable[[str], bytes | None],
     max_skew_seconds: int = 300,
     required_components: frozenset[str] = frozenset(DEFAULT_COMPONENTS),
+    require_nonce: bool = True,
 ) -> tuple[bool, list[SignatureVerifyError]]:
     """Verify an HTTP request signed per RFC 9421.
 
@@ -271,19 +289,27 @@ def verify_request(
     more ``SignatureVerifyError`` entries — each with a structured
     ``code`` (``missing_signature`` / ``unknown_keyid`` /
     ``content_digest_mismatch`` / ``expired`` / ``stale`` /
-    ``missing_component`` / ``signature_invalid`` /
-    ``wrong_algorithm`` / ``malformed_signature``) and a free-text
-    ``detail``.
+    ``missing_component`` / ``missing_nonce`` /
+    ``signature_invalid`` / ``wrong_algorithm`` /
+    ``malformed_signature``) and a free-text ``detail``.
 
     ``public_key_resolver(keyid)`` is invoked once per signature and
     returns 32 bytes of Ed25519 public-key material, or ``None`` to
     signal an unknown ``keyid`` (which the verifier maps to the
     ``unknown_keyid`` error code).
 
-    The caller is responsible for nonce-tracking. The verifier
-    enforces ``created`` is within ``max_skew_seconds`` of "now" and
-    that ``expires`` (if set on the signature) hasn't passed; it does
-    not maintain a seen-nonce store.
+    The caller is responsible for nonce-tracking (deduplicating seen
+    nonces in storage of its choice). The verifier enforces ``created``
+    is within ``max_skew_seconds`` of "now" and that ``expires`` (if set
+    on the signature) hasn't passed.
+
+    ``require_nonce`` (default ``True``, PT-003 footgun fix) rejects
+    signatures whose ``Signature-Input`` parameters omit ``nonce``. A
+    signature without a nonce is replayable for the full
+    ``max_skew_seconds`` window on any verifier that doesn't enforce
+    one separately. Set ``False`` only when the caller has its own
+    replay defence (e.g. a higher-level layer that pins a single-use
+    token in the body).
     """
     errors: list[SignatureVerifyError] = []
 
@@ -384,6 +410,25 @@ def verify_request(
             )
         )
         return False, errors
+
+    # PT-003: reject signatures that omit ``nonce`` when require_nonce
+    # is set (default). A signature without a nonce is replayable for
+    # the full max_skew_seconds window on any verifier that doesn't
+    # enforce one separately.
+    if require_nonce:
+        for result in results:
+            params = result.parameters or {}
+            if not params.get("nonce"):
+                errors.append(
+                    SignatureVerifyError(
+                        code="missing_nonce",
+                        detail=(
+                            "signature parameters omit nonce; "
+                            "require_nonce=True (default) rejects this"
+                        ),
+                    )
+                )
+                return False, errors
 
     # Cross-check that the algorithm parameter (if signed) is Ed25519.
     # The library's verifier won't pass for other algorithms because we
